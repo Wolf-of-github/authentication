@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::auth::{password, token_service::TokenPair, TokenService};
+use crate::auth::{password, token_service::TokenPair};
 use crate::db;
 use crate::error::{AppError, Result};
 use crate::state::AppState;

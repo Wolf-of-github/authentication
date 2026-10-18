@@ -26,6 +26,7 @@ pub enum TokenError {
 }
 
 /// Service for JWT operations
+#[derive(Clone)]
 pub struct TokenService {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
