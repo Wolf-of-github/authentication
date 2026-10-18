@@ -91,6 +91,41 @@ pub async fn create_user(
     Ok(id)
 }
 
+pub async fn list_users(pool: &SqlitePool) -> sqlx::Result<Vec<User>> {
+    let rows = sqlx::query_as!(
+        UserRow,
+        "SELECT id, email, name, password_hash, roles FROM users ORDER BY created_at"
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(User::from).collect())
+}
+
+pub async fn is_token_family_revoked(pool: &SqlitePool, family: Uuid) -> sqlx::Result<bool> {
+    let family_str = family.to_string();
+    let row = sqlx::query!(
+        "SELECT 1 as present FROM revoked_token_families WHERE family = ?",
+        family_str
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.is_some())
+}
+
+pub async fn revoke_token_family(pool: &SqlitePool, family: Uuid) -> sqlx::Result<()> {
+    let family_str = family.to_string();
+    sqlx::query!(
+        "INSERT INTO revoked_token_families (family) VALUES (?) ON CONFLICT(family) DO NOTHING",
+        family_str
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 pub async fn create_admin_if_missing(
     pool: &SqlitePool,
     email: &str,

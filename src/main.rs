@@ -22,7 +22,8 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let database_url = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://auth.db".to_string());
+    let database_url =
+        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://auth.db?mode=rwc".to_string());
 
     let db_pool = SqlitePoolOptions::new()
         .max_connections(5)

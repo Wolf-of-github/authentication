@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO revoked_token_families (family) VALUES (?) ON CONFLICT(family) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2ba97b13f232890f8c9613d6998419b70455fd882a7d2267cefa02689e0e7df6"
+}

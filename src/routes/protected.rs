@@ -1,8 +1,10 @@
 // src/routes/protected.rs
 // Routes requiring authentication
 
-use axum::{routing::get, Json, Router};
+use axum::{extract::State, routing::get, Json, Router};
 
+use crate::db;
+use crate::error::{AppError, Result};
 use crate::middleware::auth::{AuthUser, RequireAdmin};
 use crate::state::AppState;
 
@@ -25,13 +27,27 @@ async fn get_current_user(user: AuthUser) -> Json<UserProfile> {
 async fn admin_list_users(
     _admin: RequireAdmin,
     user: AuthUser,  // Also get user info
-) -> Json<AdminResponse> {
+    State(state): State<AppState>,
+) -> Result<Json<AdminResponse>> {
     tracing::info!(admin.id = %user.id, "Admin accessed user list");
 
-    Json(AdminResponse {
-        users: vec![],
-        total: 0,
-    })
+    let users = db::list_users(&state.db)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+
+    let profiles: Vec<UserProfile> = users
+        .into_iter()
+        .map(|u| UserProfile {
+            id: u.id,
+            email: u.email,
+            roles: u.roles,
+        })
+        .collect();
+
+    Ok(Json(AdminResponse {
+        total: profiles.len(),
+        users: profiles,
+    }))
 }
 
 #[derive(serde::Serialize)]

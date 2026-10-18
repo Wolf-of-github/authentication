@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT 1 as present FROM users WHERE email = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "present",
+        "ordinal": 0,
+        "type_info": "Int"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d290578bb899d139124c9808b1d7eb5eca7f57767dfcba49f792de4b99a40f78"
+}

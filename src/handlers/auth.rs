@@ -161,10 +161,15 @@ pub async fn refresh(
         .token_service
         .validate_refresh_token(&payload.refresh_token)?;
 
-    // Check if token is revoked (should check database/cache)
-    // if is_token_revoked(&claims.family).await {
-    //     return Err(AppError::Unauthorized);
-    // }
+    // Check if this refresh token's family has already been revoked
+    // (e.g. it was already used once, or the user logged out)
+    if db::is_token_family_revoked(&state.db, claims.family)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?
+    {
+        tracing::warn!(user.id = %claims.sub, family = %claims.family, "Reuse of revoked refresh token family");
+        return Err(AppError::Unauthorized);
+    }
 
     // Fetch current user info
     let user = db::find_user_by_id(&state.db, claims.sub)
@@ -177,8 +182,10 @@ pub async fn refresh(
         .token_service
         .generate_token_pair(user.id, user.email, user.roles)?;
 
-    // Optionally: Revoke old refresh token family (rotation)
-    // revoke_token_family(&claims.family).await;
+    // Rotation: revoke the old refresh token's family so it can't be reused
+    db::revoke_token_family(&state.db, claims.family)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
     tracing::info!(user.id = %claims.sub, "Tokens refreshed");
 
@@ -193,8 +200,10 @@ pub async fn logout(
 ) -> Result<StatusCode> {
     // Validate and get claims
     if let Ok(claims) = state.token_service.validate_refresh_token(&payload.refresh_token) {
-        // Revoke the token family
-        // revoke_token_family(&claims.family).await;
+        // Revoke the token family so it can no longer be used to refresh
+        if let Err(e) = db::revoke_token_family(&state.db, claims.family).await {
+            tracing::error!(error = %e, "Failed to revoke token family on logout");
+        }
         tracing::info!(user.id = %claims.sub, "User logged out");
     }
 
