@@ -24,10 +24,12 @@ argon2 = "0.5"
 rand = "0.8"
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "uuid", "chrono"] }
+mongodb = "3"
+bson = { version = "2", features = ["uuid-1", "chrono-0_4"] }
 
 # Utilities
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "1"
+futures = "0.3"

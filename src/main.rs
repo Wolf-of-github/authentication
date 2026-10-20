@@ -9,7 +9,7 @@ mod middleware;
 mod routes;
 mod state;
 
-use sqlx::sqlite::SqlitePoolOptions;
+use mongodb::Client;
 use std::env;
 
 use auth::TokenService;
@@ -22,24 +22,23 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let database_url =
-        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://auth.db?mode=rwc".to_string());
+    let mongodb_uri = env::var("MONGODB_URI").expect("MONGODB_URI must be set");
+    let mongodb_db_name =
+        env::var("MONGODB_DB_NAME").unwrap_or_else(|_| "authentication".to_string());
 
-    let db_pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
+    let client = Client::with_uri_str(&mongodb_uri).await?;
+    let db = client.database(&mongodb_db_name);
 
-    sqlx::migrate!("./migrations").run(&db_pool).await?;
+    db::ensure_indexes(&db).await?;
 
-    seed_admin_from_env(&db_pool).await?;
+    seed_admin_from_env(&db).await?;
 
     let auth_config = AuthConfig::from_env();
     let token_service = TokenService::new(&auth_config);
 
     let state = AppState {
         token_service,
-        db: db_pool,
+        db,
     };
 
     let app = routes::router().with_state(state);
@@ -54,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn seed_admin_from_env(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
+async fn seed_admin_from_env(db: &mongodb::Database) -> anyhow::Result<()> {
     let (email, password) = match (env::var("ADMIN_EMAIL"), env::var("ADMIN_PASSWORD")) {
         (Ok(email), Ok(password)) => (email, password),
         _ => return Ok(()),
@@ -68,7 +67,7 @@ async fn seed_admin_from_env(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
     })
     .await??;
 
-    db::create_admin_if_missing(pool, &email, &password_hash, &name).await?;
+    db::create_admin_if_missing(db, &email, &password_hash, &name).await?;
 
     tracing::info!(%email, "admin user ensured");
 

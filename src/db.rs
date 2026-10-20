@@ -1,7 +1,11 @@
 // src/db.rs
-// SQLite queries for user accounts
+// MongoDB queries for user accounts
 
-use sqlx::SqlitePool;
+use bson::doc;
+use chrono::Utc;
+use futures::stream::TryStreamExt;
+use mongodb::{Collection, Database};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub struct User {
@@ -12,141 +16,175 @@ pub struct User {
     pub roles: Vec<String>,
 }
 
-fn parse_roles(roles: &str) -> Vec<String> {
-    roles.split(',').map(|r| r.trim().to_string()).collect()
-}
-
-struct UserRow {
-    id: String,
+// _id/family are stored as `bson::Uuid` rather than `uuid::Uuid`: the latter's
+// serde impl writes a plain string, while the `doc! { "_id": uuid::Uuid }` query
+// macro (via bson's uuid-1 feature) builds a Binary value for the same type —
+// mismatched representations mean a query would never match what got inserted.
+#[derive(Debug, Serialize, Deserialize)]
+struct UserDoc {
+    #[serde(rename = "_id")]
+    id: bson::Uuid,
     email: String,
     name: String,
     password_hash: String,
-    roles: String,
+    roles: Vec<String>,
+    created_at: chrono::DateTime<Utc>,
 }
 
-impl From<UserRow> for User {
-    fn from(row: UserRow) -> Self {
+impl From<UserDoc> for User {
+    fn from(doc: UserDoc) -> Self {
         User {
-            id: Uuid::parse_str(&row.id).expect("stored user id is not a valid UUID"),
-            email: row.email,
-            name: row.name,
-            password_hash: row.password_hash,
-            roles: parse_roles(&row.roles),
+            id: doc.id.into(),
+            email: doc.email,
+            name: doc.name,
+            password_hash: doc.password_hash,
+            roles: doc.roles,
         }
     }
 }
 
-pub async fn find_user_by_email(pool: &SqlitePool, email: &str) -> sqlx::Result<Option<User>> {
-    let row = sqlx::query_as!(
-        UserRow,
-        "SELECT id, email, name, password_hash, roles FROM users WHERE email = ?",
-        email
-    )
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row.map(User::from))
+#[derive(Debug, Serialize, Deserialize)]
+struct RevokedFamilyDoc {
+    #[serde(rename = "_id")]
+    family: bson::Uuid,
+    revoked_at: chrono::DateTime<Utc>,
 }
 
-pub async fn find_user_by_id(pool: &SqlitePool, id: Uuid) -> sqlx::Result<Option<User>> {
-    let id_str = id.to_string();
-    let row = sqlx::query_as!(
-        UserRow,
-        "SELECT id, email, name, password_hash, roles FROM users WHERE id = ?",
-        id_str
-    )
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row.map(User::from))
+fn users_collection(db: &Database) -> Collection<UserDoc> {
+    db.collection("users")
 }
 
-pub async fn user_exists(pool: &SqlitePool, email: &str) -> sqlx::Result<bool> {
-    let row = sqlx::query!("SELECT 1 as present FROM users WHERE email = ?", email)
-        .fetch_optional(pool)
-        .await?;
-
-    Ok(row.is_some())
+fn revoked_token_families_collection(db: &Database) -> Collection<RevokedFamilyDoc> {
+    db.collection("revoked_token_families")
 }
 
-pub async fn create_user(
-    pool: &SqlitePool,
-    email: &str,
-    password_hash: &str,
-    name: &str,
-) -> sqlx::Result<Uuid> {
-    let id = Uuid::new_v4();
-    let id_str = id.to_string();
+/// Create indexes required by the application. Safe to call on every startup.
+pub async fn ensure_indexes(db: &Database) -> mongodb::error::Result<()> {
+    use mongodb::options::IndexOptions;
+    use mongodb::IndexModel;
 
-    sqlx::query!(
-        "INSERT INTO users (id, email, password_hash, name, roles) VALUES (?, ?, ?, ?, 'user')",
-        id_str,
-        email,
-        password_hash,
-        name
-    )
-    .execute(pool)
-    .await?;
+    let email_index = IndexModel::builder()
+        .keys(doc! { "email": 1 })
+        .options(IndexOptions::builder().unique(true).build())
+        .build();
 
-    Ok(id)
-}
-
-pub async fn list_users(pool: &SqlitePool) -> sqlx::Result<Vec<User>> {
-    let rows = sqlx::query_as!(
-        UserRow,
-        "SELECT id, email, name, password_hash, roles FROM users ORDER BY created_at"
-    )
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows.into_iter().map(User::from).collect())
-}
-
-pub async fn is_token_family_revoked(pool: &SqlitePool, family: Uuid) -> sqlx::Result<bool> {
-    let family_str = family.to_string();
-    let row = sqlx::query!(
-        "SELECT 1 as present FROM revoked_token_families WHERE family = ?",
-        family_str
-    )
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(row.is_some())
-}
-
-pub async fn revoke_token_family(pool: &SqlitePool, family: Uuid) -> sqlx::Result<()> {
-    let family_str = family.to_string();
-    sqlx::query!(
-        "INSERT INTO revoked_token_families (family) VALUES (?) ON CONFLICT(family) DO NOTHING",
-        family_str
-    )
-    .execute(pool)
-    .await?;
+    users_collection(db).create_index(email_index).await?;
 
     Ok(())
 }
 
-pub async fn create_admin_if_missing(
-    pool: &SqlitePool,
+pub async fn find_user_by_email(db: &Database, email: &str) -> mongodb::error::Result<Option<User>> {
+    let doc = users_collection(db)
+        .find_one(doc! { "email": email })
+        .await?;
+
+    Ok(doc.map(User::from))
+}
+
+pub async fn find_user_by_id(db: &Database, id: Uuid) -> mongodb::error::Result<Option<User>> {
+    let doc = users_collection(db)
+        .find_one(doc! { "_id": bson::Uuid::from(id) })
+        .await?;
+
+    Ok(doc.map(User::from))
+}
+
+pub async fn user_exists(db: &Database, email: &str) -> mongodb::error::Result<bool> {
+    let count = users_collection(db)
+        .count_documents(doc! { "email": email })
+        .await?;
+
+    Ok(count > 0)
+}
+
+pub async fn create_user(
+    db: &Database,
     email: &str,
     password_hash: &str,
     name: &str,
-) -> sqlx::Result<()> {
-    if user_exists(pool, email).await? {
+) -> mongodb::error::Result<Uuid> {
+    let id = Uuid::new_v4();
+
+    let doc = UserDoc {
+        id: id.into(),
+        email: email.to_string(),
+        name: name.to_string(),
+        password_hash: password_hash.to_string(),
+        roles: vec!["user".to_string()],
+        created_at: Utc::now(),
+    };
+
+    users_collection(db).insert_one(doc).await?;
+
+    Ok(id)
+}
+
+pub async fn list_users(db: &Database) -> mongodb::error::Result<Vec<User>> {
+    let mut cursor = users_collection(db)
+        .find(doc! {})
+        .sort(doc! { "created_at": 1 })
+        .await?;
+
+    let mut users = Vec::new();
+    while let Some(doc) = cursor.try_next().await? {
+        users.push(User::from(doc));
+    }
+
+    Ok(users)
+}
+
+pub async fn is_token_family_revoked(db: &Database, family: Uuid) -> mongodb::error::Result<bool> {
+    let count = revoked_token_families_collection(db)
+        .count_documents(doc! { "_id": bson::Uuid::from(family) })
+        .await?;
+
+    Ok(count > 0)
+}
+
+pub async fn revoke_token_family(db: &Database, family: Uuid) -> mongodb::error::Result<()> {
+    let doc = RevokedFamilyDoc {
+        family: family.into(),
+        revoked_at: Utc::now(),
+    };
+
+    // Mirrors the old "INSERT ... ON CONFLICT DO NOTHING": a duplicate _id
+    // means the family is already revoked, which is not an error here.
+    match revoked_token_families_collection(db).insert_one(doc).await {
+        Ok(_) => Ok(()),
+        Err(e) if is_duplicate_key_error(&e) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+fn is_duplicate_key_error(err: &mongodb::error::Error) -> bool {
+    matches!(
+        *err.kind,
+        mongodb::error::ErrorKind::Write(mongodb::error::WriteFailure::WriteError(
+            mongodb::error::WriteError { code: 11000, .. }
+        ))
+    )
+}
+
+pub async fn create_admin_if_missing(
+    db: &Database,
+    email: &str,
+    password_hash: &str,
+    name: &str,
+) -> mongodb::error::Result<()> {
+    if user_exists(db, email).await? {
         return Ok(());
     }
 
-    let id = Uuid::new_v4().to_string();
+    let doc = UserDoc {
+        id: Uuid::new_v4().into(),
+        email: email.to_string(),
+        name: name.to_string(),
+        password_hash: password_hash.to_string(),
+        roles: vec!["admin".to_string(), "user".to_string()],
+        created_at: Utc::now(),
+    };
 
-    sqlx::query!(
-        "INSERT INTO users (id, email, password_hash, name, roles) VALUES (?, ?, ?, ?, 'admin,user')",
-        id,
-        email,
-        password_hash,
-        name
-    )
-    .execute(pool)
-    .await?;
+    users_collection(db).insert_one(doc).await?;
 
     Ok(())
 }

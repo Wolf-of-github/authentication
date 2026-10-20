@@ -1,16 +1,17 @@
 # Authentication Service
 
-JWT-based authentication service built with Rust, Axum, and SQLite.
+JWT-based authentication service built with Rust, Axum, and MongoDB (Atlas or self-hosted).
 
 ## Setup
 
 ```bash
 cp .env.example .env
+# edit .env: set MONGODB_URI to your Atlas (or local) connection string
 export $(cat .env | xargs)
 cargo run
 ```
 
-On first run, this creates `auth.db`, applies migrations, and (if `ADMIN_EMAIL`/`ADMIN_PASSWORD` are set) seeds an admin user.
+On first run, this connects to MongoDB, ensures required indexes exist (unique index on `users.email`), and (if `ADMIN_EMAIL`/`ADMIN_PASSWORD` are set) seeds an admin user.
 
 ## Routes
 
