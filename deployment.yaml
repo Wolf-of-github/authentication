@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentication
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: authentication
+  template:
+    metadata:
+      labels:
+        app: authentication
+    spec:
+      containers:
+        - name: authentication
+          image: ishaanapte0108/authentication:v1
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: authentication-secrets

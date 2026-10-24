@@ -10,8 +10,8 @@ use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/me", get(get_current_user))
-        .route("/api/admin/users", get(admin_list_users))
+        .route("/api/auth/me", get(get_current_user))
+        .route("/api/auth/admin/users", get(admin_list_users))
 }
 
 /// Get current user profile (requires authentication)

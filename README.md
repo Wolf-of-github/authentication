@@ -21,8 +21,8 @@ On first run, this connects to MongoDB, ensures required indexes exist (unique i
 | POST   | `/api/auth/login`     | None             | Authenticate with email/password, returns tokens |
 | POST   | `/api/auth/refresh`   | None (refresh token in body) | Exchange a refresh token for a new token pair |
 | POST   | `/api/auth/logout`    | None (refresh token in body) | Invalidate a refresh token |
-| GET    | `/api/me`              | Bearer access token | Returns the current authenticated user's profile |
-| GET    | `/api/admin/users`     | Bearer access token + `admin` role | Admin-only endpoint, lists users |
+| GET    | `/api/auth/me`              | Bearer access token | Returns the current authenticated user's profile |
+| GET    | `/api/auth/admin/users`     | Bearer access token + `admin` role | Admin-only endpoint, lists users |
 
 ### Request/response shapes
 
@@ -66,7 +66,7 @@ On first run, this connects to MongoDB, ensures required indexes exist (unique i
 // response: 204 No Content
 ```
 
-**GET /api/me**
+**GET /api/auth/me**
 ```
 Authorization: Bearer <access_token>
 ```
@@ -75,7 +75,7 @@ Authorization: Bearer <access_token>
 { "id": "...", "email": "...", "roles": ["user"] }
 ```
 
-**GET /api/admin/users**
+**GET /api/auth/admin/users**
 ```
 Authorization: Bearer <access_token>   // must include "admin" role
 ```
